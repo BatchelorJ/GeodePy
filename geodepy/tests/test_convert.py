@@ -5,15 +5,9 @@ import numpy as np
 from geodepy.fileio import read_dnacoord
 from geodepy.constants import grs80, ans, isg
 from geodepy.convert import (
-    dec2hp,
     hp2dec,
     DMSAngle,
     DDMAngle,
-    dec2dms,
-    dec2ddm,
-    hp2dms,
-    hp2ddm,
-    dd2sec,
     yyyydoy_to_date,
     date_to_yyyydoy,
     grid2geo,
@@ -21,6 +15,8 @@ from geodepy.convert import (
     geo2grid,
     llh2xyz,
     xyz2llh,
+    xyz2grid,
+    grid2xyz,
 )
 
 
@@ -172,6 +168,12 @@ class TestConvert(unittest.TestCase):
             assert abs(coord.y - ycomp) < 2e-4
             assert abs(coord.z - zcomp) < 2e-4
 
+        # Test point on equator uses the supplied ellipsoid
+        x, y, z = llh2xyz(0, 0, 0, ellipsoid=ans)
+        self.assertAlmostEqual(x, ans.semimaj, 6)
+        self.assertAlmostEqual(y, 0, 6)
+        self.assertAlmostEqual(z, 0, 6)
+
     def test_xyz2llh(self):
         abs_path = os.path.abspath(os.path.dirname(__file__))
 
@@ -315,6 +317,115 @@ class TestConvert(unittest.TestCase):
         # test UserWarning raised if prj/ellipsoid combination isn't recommended
         with self.assertWarns(UserWarning):
             grid2geo(zone=551, east=300000, north=1500000, ellipsoid=grs80, prj=isg)
+
+    def test_xyz2grid(self):
+        # Single Point Test
+        hem, zone, east, north, ellht, psf, grid_conv = xyz2grid(
+            -4131654.2815, 2896107.9738, -3888601.3067
+        )
+        self.assertEqual(hem, "South")
+        self.assertEqual(zone, 55)
+        self.assertAlmostEqual(east, 321405.5592, 3)
+        self.assertAlmostEqual(north, 5813614.1613, 3)
+        self.assertAlmostEqual(ellht, 39.6514, 3)
+        self.assertAlmostEqual(psf, 0.99999287, 8)
+        self.assertAlmostEqual(grid_conv, -1.2439811331, 9)
+
+        # Tests comparing results from DynAdjust Adjusted Coordinate File
+        # including 109 Points Across Australia
+        abs_path = os.path.abspath(os.path.dirname(__file__))
+        testdata = read_dnacoord(
+            os.path.join(abs_path, "resources/natadjust_rvs_example.dat")
+        )
+        for coord in testdata:
+            coord.converthptodd()
+            hem, zonecomp, eastcomp, northcomp, ellhtcomp, psf, grid_conv = xyz2grid(
+                coord.x, coord.y, coord.z
+            )
+            self.assertEqual(zonecomp, coord.zone)
+            self.assertLess(abs(eastcomp - coord.easting), 4e-4)
+            self.assertLess(abs(northcomp - coord.northing), 4e-4)
+            self.assertLess(abs(ellhtcomp - coord.ell_ht), 2e-4)
+
+        # Test North Hemisphere Output
+        x, y, z = llh2xyz(DMSAngle(34, 57, 00.79653), DMSAngle(117, 48, 36.68783))
+        north_grid = xyz2grid(x, y, z)
+        self.assertEqual(north_grid[0], "North")
+        self.assertEqual(north_grid[1], 50)
+        self.assertAlmostEqual(north_grid[2], 573976.8747, 3)
+        self.assertAlmostEqual(north_grid[3], 3867822.4539, 3)
+
+        # Test ISG projection with ANS ellipsoid
+        x, y, z = llh2xyz(-33.8, 151.2, 50, ellipsoid=ans)
+        isg_grid = xyz2grid(x, y, z, ellipsoid=ans, prj=isg)
+        geo_grid = geo2grid(-33.8, 151.2, ellipsoid=ans, prj=isg)
+        self.assertEqual(isg_grid[1], geo_grid[1])  # Zone
+        self.assertAlmostEqual(isg_grid[2], geo_grid[2], 3)  # Easting
+        self.assertAlmostEqual(isg_grid[3], geo_grid[3], 3)  # Northing
+        self.assertAlmostEqual(isg_grid[4], 50, 3)  # Ellipsoid Height
+
+    def test_grid2xyz(self):
+        # Single Point Test
+        x, y, z = grid2xyz(55, 321405.5592, 5813614.1613, 39.6514)
+        self.assertAlmostEqual(x, -4131654.2815, 3)
+        self.assertAlmostEqual(y, 2896107.9738, 3)
+        self.assertAlmostEqual(z, -3888601.3067, 3)
+
+        # Tests comparing results from DynAdjust Adjusted Coordinate File
+        # including 109 Points Across Australia
+        abs_path = os.path.abspath(os.path.dirname(__file__))
+        testdata = read_dnacoord(
+            os.path.join(abs_path, "resources/natadjust_rvs_example.dat")
+        )
+        for coord in testdata:
+            coord.converthptodd()
+            xcomp, ycomp, zcomp = grid2xyz(
+                coord.zone, coord.easting, coord.northing, coord.ell_ht
+            )
+            self.assertLess(abs(xcomp - coord.x), 3e-4)
+            self.assertLess(abs(ycomp - coord.y), 3e-4)
+            self.assertLess(abs(zcomp - coord.z), 3e-4)
+
+        # Test North Hemisphere Input
+        x, y, z = grid2xyz(50, 573976.8747, 3867822.4539, hemisphere="North")
+        xref, yref, zref = llh2xyz(
+            DMSAngle(34, 57, 00.79653), DMSAngle(117, 48, 36.68783)
+        )
+        self.assertAlmostEqual(x, xref, 3)
+        self.assertAlmostEqual(y, yref, 3)
+        self.assertAlmostEqual(z, zref, 3)
+
+        # Test round trip through xyz2grid
+        xyz = (-4131654.2815, 2896107.9738, -3888601.3067)
+        hem, zone, east, north, ellht, psf, grid_conv = xyz2grid(*xyz)
+        np.testing.assert_allclose(
+            grid2xyz(zone, east, north, ellht, hemisphere=hem), xyz, atol=1e-3
+        )
+
+        # Test round trip with ISG projection and ANS ellipsoid
+        xyz = llh2xyz(-33.8, 151.2, 50, ellipsoid=ans)
+        hem, zone, east, north, ellht, psf, grid_conv = xyz2grid(
+            *xyz, ellipsoid=ans, prj=isg
+        )
+        np.testing.assert_allclose(
+            grid2xyz(
+                zone, east, north, ellht, hemisphere=hem, ellipsoid=ans, prj=isg
+            ),
+            xyz,
+            atol=1e-3,
+        )
+
+        # Test hemisphere, ellipsoid and prj are keyword-only
+        with self.assertRaises(TypeError):
+            grid2xyz(50, 573976.8747, 3867822.4539, 0, "North")
+
+        # Test Input Validation passes through from grid2geo
+        with self.assertRaises(ValueError):
+            grid2xyz(61, 500000, 5000000)
+        with self.assertRaises(ValueError):
+            grid2xyz(55, 500000, 5000000, hemisphere="fail")
+        with self.assertRaises(ValueError):
+            grid2xyz(530, 300000, 1500000, ellipsoid=ans, prj=isg)
 
 
 if __name__ == "__main__":

@@ -645,10 +645,7 @@ def llh2xyz(lat, lon, ellht=0, ellipsoid=grs80):
     lat = radians(angular_typecheck(lat))
     lon = radians(angular_typecheck(lon))
     # Calculate Ellipsoid Radius of Curvature in the Prime Vertical - nu
-    if lat == 0:
-        nu = grs80.semimaj
-    else:
-        nu = ellipsoid.semimaj / (sqrt(1 - ellipsoid.ecc1sq * (sin(lat) ** 2)))
+    nu = ellipsoid.semimaj / (sqrt(1 - ellipsoid.ecc1sq * (sin(lat) ** 2)))
     # Calculate x, y, z
     x = (nu + ellht) * cos(lat) * cos(lon)
     y = (nu + ellht) * cos(lat) * sin(lon)
@@ -658,9 +655,10 @@ def llh2xyz(lat, lon, ellht=0, ellipsoid=grs80):
 
 def xyz2grid(x, y, z, zone=0, ellipsoid=grs80, prj=utm):
     """
-    Converts Cartesian X, Y, Z coordinate to UTM Projection Hemisphere, Zone, Easting,
-    Northing, Ellipsoid Height, Point Scale Factor and Grid Convergence. Default
-    ellipsoid is GRS80
+    Converts Cartesian X, Y, Z coordinate to Transverse Mercator Projection
+    Hemisphere, Zone, Easting, Northing, Ellipsoid Height, Point Scale Factor
+    and Grid Convergence. Default Projection is Universal Transverse Mercator
+    Projection using GRS80 Ellipsoid parameters.
 
     :param x: Cartesian X Coordinate (metres)
     :param y: Cartesian Y Coordinate (metres)
@@ -675,30 +673,34 @@ def xyz2grid(x, y, z, zone=0, ellipsoid=grs80, prj=utm):
              Point Scale Factor, Grid Convergence (Decimal Degrees)
     :rtype: tuple
     """
-    lat, lon, ell_ht = xyz2llh(x, y, z, ellipsoid)
-    hemisphere, zone, east, north, psf, grid_conv =  geo2grid(lat, lon, zone, ellipsoid, prj)
-    return hemisphere, zone, east, north, ell_ht, psf, grid_conv
+    lat, lon, ellht = xyz2llh(x, y, z, ellipsoid)
+    hemisphere, zone, east, north, psf, grid_conv = geo2grid(
+        lat, lon, zone, ellipsoid, prj
+    )
+    return hemisphere, zone, east, north, ellht, psf, grid_conv
 
 
-def grid2xyz(zone, east, north, ell_ht=0, hemisphere="south", ellipsoid=grs80, prj=utm):
+def grid2xyz(
+    zone, east, north, ellht=0, *, hemisphere="south", ellipsoid=grs80, prj=utm
+):
     """
     Takes a Transverse Mercator grid co-ordinate (Zone, Easting, Northing,
-    Hemisphere) and returns its corresponding Geographic Latitude and Longitude,
-    Point Scale Factor and Grid Convergence. Default Projection is Universal
-    Transverse Mercator Projection using GRS80 Ellipsoid parameters.
+    Hemisphere) and returns its corresponding Cartesian X, Y and Z Coordinates.
+    If no ellipsoid height is specified, the default is 0m. Default Projection
+    is Universal Transverse Mercator Projection using GRS80 Ellipsoid parameters.
 
     :param zone: Zone Number - 1 to 60
     :param east: Easting (m, within 3330km of Central Meridian)
     :param north: Northing (m, 0 to 10,000,000m)
-    :param ell_ht: Ellipsoid Height (metres, default is 0m)
+    :param ellht: Ellipsoid Height (metres, default is 0m)
     :param hemisphere: String - 'North' or 'South'(default)
     :param ellipsoid: Ellipsoid Object
     :type ellipsoid: Ellipsoid
     :return: Cartesian X, Y, Z Coordinate in metres
     :rtype: tuple
     """
-    lat, lon, psf, grid_conv = grid2geo(zone, east, north, hemisphere, ellipsoid, prj)
-    return llh2xyz(lat, lon, ell_ht, ellipsoid)
+    lat, lon, _, _ = grid2geo(zone, east, north, hemisphere, ellipsoid, prj)
+    return llh2xyz(lat, lon, ellht, ellipsoid)
 
 
 def date_to_yyyydoy(date):
