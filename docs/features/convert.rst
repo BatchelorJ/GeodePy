@@ -25,6 +25,10 @@ This module contains functions for converting between different coordinate types
 
 .. autofunction:: geodepy.convert.llh2xyz
 
+.. autofunction:: geodepy.convert.xyz2grid
+
+.. autofunction:: geodepy.convert.grid2xyz
+
 .. autofunction:: geodepy.convert.date_to_yyyydoy
 
 .. autofunction:: geodepy.convert.yyyydoy_to_date  
